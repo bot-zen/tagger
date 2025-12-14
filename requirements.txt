@@ -10,7 +10,7 @@ ipython==4.1.2
 ipython-genutils==0.1.0
 Keras==0.3.2
 matplotlib==1.5.1
-numpy==1.10.4
+numpy==1.22.0
 path.py==8.1.2
 pexpect==4.0.1
 pickleshare==0.6
