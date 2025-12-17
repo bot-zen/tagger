@@ -1,116 +1,168 @@
-# -*- coding: UTF-8 -*-
-
 import bz2
+import logging
 import re
-
 from itertools import islice
-from os import path
+from pathlib import Path
 
 import numpy as np
 
-from . import logger
+from .config import Settings
 from .representation import postags as _postags
 from .representation import qonehotchars as _qonehotchars
-from .slow_utils import w2v_big, w2v_small
+from .slow_utils import build_embeddings, w2v_big, w2v_small
 
+logger = logging.getLogger(__name__)
 np.random.seed(0)  # For reproducability
 
-_cmc_fnames = ["cmc_train_blog_comment.txt",
-               "cmc_train_professional_chat.txt",
-               "cmc_train_social_chat.txt",
-               "cmc_train_twitter_1.txt",
-               "cmc_train_twitter_2.txt",
-               "cmc_train_whats_app.txt",
-               "cmc_train_wiki_discussion_1.txt",
-               "cmc_train_wiki_discussion_2.txt"]
+DATA_ROOT = Path(__file__).resolve().parents[2] / "data"
 
-_web_names = ["web_train_%03d.txt" % (i) for i in range(1, 12)]
+_cmc_fnames = [
+    "cmc_train_blog_comment.txt",
+    "cmc_train_professional_chat.txt",
+    "cmc_train_social_chat.txt",
+    "cmc_train_twitter_1.txt",
+    "cmc_train_twitter_2.txt",
+    "cmc_train_whats_app.txt",
+    "cmc_train_wiki_discussion_1.txt",
+    "cmc_train_wiki_discussion_2.txt",
+]
 
-cmc_raw_flocs = [
-    path.join('../data/empirist/empirist_training_cmc/raw/', cmc_fname)
-    for cmc_fname in _cmc_fnames]
-cmc_tokd_flocs = [
-    path.join('../data/empirist/empirist_training_cmc/tokenized/', cmc_fname)
-    for cmc_fname in _cmc_fnames]
-cmc_tggd_flocs = [
-    path.join('../data/empirist/empirist_training_cmc/tagged/', cmc_fname)
-    for cmc_fname in _cmc_fnames]
+_web_names = [f"web_train_{i:03d}.txt" for i in range(1, 12)]
 
-web_raw_flocs = [
-    path.join('../data/empirist/empirist_training_web/raw/', web_name)
-    for web_name in _web_names]
-web_tokd_flocs = [
-    path.join('../data/empirist/empirist_training_web/tokenized/', web_name)
-    for web_name in _web_names]
-web_tggd_flocs = [
-    path.join('../data/empirist/empirist_training_web/tagged/', web_name)
-    for web_name in _web_names]
 
-all_raw_flocs = cmc_raw_flocs + web_raw_flocs
-all_tokd_flocs = cmc_tokd_flocs + web_tokd_flocs
-all_tggd_flocs = cmc_tggd_flocs + web_tggd_flocs
-all_postwita_tggd_flocs = (['../data/postwita/postwita.vrt',
-                            '../data/postwita/didi.vrt'])
-all_postwita_tst_flocs = (['../data/postwita/tst.txt'])
+def _with_root(root: Path, relative: str) -> Path:
+    return root.joinpath(relative)
 
-_cmc_trial_fnames = ["professional_chat.txt",
-                     "social_chat.txt",
-                     "tweets.txt",
-                     "wikipedia_talk_pages.txt"]
 
-_web_trial_fnames = ["trial006_hobby.txt",
-                     "trial007_reisen.txt",
-                     "trial008_lifestyle.txt",
-                     "trial009_beruf.txt",
-                     "trial010_sonstige.txt"]
+def default_data_paths(data_root: Path = DATA_ROOT) -> dict[str, list[Path]]:
+    data_root = Path(data_root)
+    cmc_raw = [_with_root(data_root, f"empirist/empirist_training_cmc/raw/{name}") for name in _cmc_fnames]
+    cmc_tokd = [_with_root(data_root, f"empirist/empirist_training_cmc/tokenized/{name}") for name in _cmc_fnames]
+    cmc_tggd = [_with_root(data_root, f"empirist/empirist_training_cmc/tagged/{name}") for name in _cmc_fnames]
 
-cmc_trial_raw_flocs = [
-    path.join('../data/empirist/empirist_trial_cmc/raw/', cmc_fname)
-    for cmc_fname in _cmc_trial_fnames]
-cmc_trial_tokd_flocs = [
-    path.join('../data/empirist/empirist_trial_cmc/tokenized/', cmc_fname)
-    for cmc_fname in _cmc_trial_fnames]
-cmc_trial_tggd_flocs = [
-    path.join('../data/empirist/empirist_trial_cmc/tagged/', cmc_fname)
-    for cmc_fname in _cmc_trial_fnames]
+    web_raw = [_with_root(data_root, f"empirist/empirist_training_web/raw/{name}") for name in _web_names]
+    web_tokd = [_with_root(data_root, f"empirist/empirist_training_web/tokenized/{name}") for name in _web_names]
+    web_tggd = [_with_root(data_root, f"empirist/empirist_training_web/tagged/{name}") for name in _web_names]
 
-web_trial_raw_flocs = [
-    path.join('../data/empirist/empirist_trial_web/raw/', web_name)
-    for web_name in _web_trial_fnames]
-web_trial_tokd_flocs = [
-    path.join('../data/empirist/empirist_trial_web/tokenized/', web_name)
-    for web_name in _web_trial_fnames]
-web_trial_tggd_flocs = [
-    path.join('../data/empirist/empirist_trial_web/tagged/', web_name)
-    for web_name in _web_trial_fnames]
+    postwita_tggd = [
+        _with_root(data_root, "postwita/postwita.vrt"),
+        _with_root(data_root, "postwita/didi.vrt"),
+    ]
+    postwita_tst = [_with_root(data_root, "postwita/tst.txt")]
 
-all_trial_raw_flocs = cmc_trial_raw_flocs + web_trial_raw_flocs
-all_trial_tokd_flocs = cmc_trial_tokd_flocs + web_trial_tokd_flocs
-all_trial_tggd_flocs = cmc_trial_tggd_flocs + web_trial_tggd_flocs
+    cmc_trial_names = [
+        "professional_chat.txt",
+        "social_chat.txt",
+        "tweets.txt",
+        "wikipedia_talk_pages.txt",
+    ]
+    web_trial_names = [
+        "trial006_hobby.txt",
+        "trial007_reisen.txt",
+        "trial008_lifestyle.txt",
+        "trial009_beruf.txt",
+        "trial010_sonstige.txt",
+    ]
 
-_cmc_tst_fnames = ["cmc_test_blog_comment.txt",
-                   "cmc_test_professional_chat.txt",
-                   "cmc_test_social_chat.txt",
-                   "cmc_test_twitter.txt",
-                   "cmc_test_whatsapp.txt",
-                   "cmc_test_wiki_discussion.txt"]
-_web_tst_names = ["web_test_%03d.txt" % (i) for i in range(1, 13)]
+    cmc_trial_raw = [_with_root(data_root, f"empirist/empirist_trial_cmc/raw/{name}") for name in cmc_trial_names]
+    cmc_trial_tokd = [_with_root(data_root, f"empirist/empirist_trial_cmc/tokenized/{name}") for name in cmc_trial_names]
+    cmc_trial_tggd = [_with_root(data_root, f"empirist/empirist_trial_cmc/tagged/{name}") for name in cmc_trial_names]
 
-cmc_tst_tokd_flocs = [
-    path.join('../data/empirist/empirist_test_pos_cmc/tokenized/', cmc_fname)
-    for cmc_fname in _cmc_tst_fnames]
-web_tst_tokd_flocs = [
-    path.join('../data/empirist/empirist_test_pos_web/tokenized/', web_name)
-    for web_name in _web_tst_names]
-all_tst_tokd_flocs = cmc_tst_tokd_flocs + web_tst_tokd_flocs
+    web_trial_raw = [_with_root(data_root, f"empirist/empirist_trial_web/raw/{name}") for name in web_trial_names]
+    web_trial_tokd = [_with_root(data_root, f"empirist/empirist_trial_web/tokenized/{name}") for name in web_trial_names]
+    web_trial_tggd = [_with_root(data_root, f"empirist/empirist_trial_web/tagged/{name}") for name in web_trial_names]
 
-cmc_gold_flocs = [
-    path.join('../data/empirist/empirist_gold_cmc/tagged/', cmc_fname)
-    for cmc_fname in _cmc_tst_fnames]
-web_gold_flocs = [
-    path.join('../data/empirist/empirist_gold_web/tagged/', web_name)
-    for web_name in _web_tst_names]
-all_gold_flocs = cmc_gold_flocs + web_gold_flocs
+    cmc_tst_names = [
+        "cmc_test_blog_comment.txt",
+        "cmc_test_professional_chat.txt",
+        "cmc_test_social_chat.txt",
+        "cmc_test_twitter.txt",
+        "cmc_test_whatsapp.txt",
+        "cmc_test_wiki_discussion.txt",
+    ]
+    web_tst_names = [f"web_test_{i:03d}.txt" for i in range(1, 13)]
+
+    cmc_tst_tokd = [_with_root(data_root, f"empirist/empirist_test_pos_cmc/tokenized/{name}") for name in cmc_tst_names]
+    web_tst_tokd = [_with_root(data_root, f"empirist/empirist_test_pos_web/tokenized/{name}") for name in web_tst_names]
+
+    cmc_gold = [_with_root(data_root, f"empirist/empirist_gold_cmc/tagged/{name}") for name in cmc_tst_names]
+    web_gold = [_with_root(data_root, f"empirist/empirist_gold_web/tagged/{name}") for name in web_tst_names]
+
+    return {
+        "cmc_raw_flocs": cmc_raw,
+        "cmc_tokd_flocs": cmc_tokd,
+        "cmc_tggd_flocs": cmc_tggd,
+        "web_raw_flocs": web_raw,
+        "web_tokd_flocs": web_tokd,
+        "web_tggd_flocs": web_tggd,
+        "all_raw_flocs": cmc_raw + web_raw,
+        "all_tokd_flocs": cmc_tokd + web_tokd,
+        "all_tggd_flocs": cmc_tggd + web_tggd,
+        "all_postwita_tggd_flocs": postwita_tggd,
+        "all_postwita_tst_flocs": postwita_tst,
+        "cmc_trial_raw_flocs": cmc_trial_raw,
+        "cmc_trial_tokd_flocs": cmc_trial_tokd,
+        "cmc_trial_tggd_flocs": cmc_trial_tggd,
+        "web_trial_raw_flocs": web_trial_raw,
+        "web_trial_tokd_flocs": web_trial_tokd,
+        "web_trial_tggd_flocs": web_trial_tggd,
+        "all_trial_raw_flocs": cmc_trial_raw + web_trial_raw,
+        "all_trial_tokd_flocs": cmc_trial_tokd + web_trial_tokd,
+        "all_trial_tggd_flocs": cmc_trial_tggd + web_trial_tggd,
+        "cmc_tst_tokd_flocs": cmc_tst_tokd,
+        "web_tst_tokd_flocs": web_tst_tokd,
+        "all_tst_tokd_flocs": cmc_tst_tokd + web_tst_tokd,
+        "cmc_gold_flocs": cmc_gold,
+        "web_gold_flocs": web_gold,
+        "all_gold_flocs": cmc_gold + web_gold,
+    }
+
+
+_paths = default_data_paths()
+cmc_raw_flocs = _paths["cmc_raw_flocs"]
+cmc_tokd_flocs = _paths["cmc_tokd_flocs"]
+cmc_tggd_flocs = _paths["cmc_tggd_flocs"]
+web_raw_flocs = _paths["web_raw_flocs"]
+web_tokd_flocs = _paths["web_tokd_flocs"]
+web_tggd_flocs = _paths["web_tggd_flocs"]
+all_raw_flocs = _paths["all_raw_flocs"]
+all_tokd_flocs = _paths["all_tokd_flocs"]
+all_tggd_flocs = _paths["all_tggd_flocs"]
+all_postwita_tggd_flocs = _paths["all_postwita_tggd_flocs"]
+all_postwita_tst_flocs = _paths["all_postwita_tst_flocs"]
+cmc_trial_raw_flocs = _paths["cmc_trial_raw_flocs"]
+cmc_trial_tokd_flocs = _paths["cmc_trial_tokd_flocs"]
+cmc_trial_tggd_flocs = _paths["cmc_trial_tggd_flocs"]
+web_trial_raw_flocs = _paths["web_trial_raw_flocs"]
+web_trial_tokd_flocs = _paths["web_trial_tokd_flocs"]
+web_trial_tggd_flocs = _paths["web_trial_tggd_flocs"]
+all_trial_raw_flocs = _paths["all_trial_raw_flocs"]
+all_trial_tokd_flocs = _paths["all_trial_tokd_flocs"]
+all_trial_tggd_flocs = _paths["all_trial_tggd_flocs"]
+cmc_tst_tokd_flocs = _paths["cmc_tst_tokd_flocs"]
+web_tst_tokd_flocs = _paths["web_tst_tokd_flocs"]
+all_tst_tokd_flocs = _paths["all_tst_tokd_flocs"]
+cmc_gold_flocs = _paths["cmc_gold_flocs"]
+web_gold_flocs = _paths["web_gold_flocs"]
+all_gold_flocs = _paths["all_gold_flocs"]
+
+
+def ensure_embeddings(local_small=None, local_big=None, settings: Settings | None = None):
+    """
+    Return (w2v_small, w2v_big) instances, preferring provided values, then
+    module defaults, and finally building from settings.
+    """
+    if local_small is not None and local_big is not None:
+        return local_small.data, local_big.data
+    if w2v_small is not None and w2v_big is not None:
+        return w2v_small.data, w2v_big.data
+    if settings:
+        small, big = build_embeddings(settings)
+        return small.data, big.data
+    raise RuntimeError(
+        "Word2Vec models not configured. Provide paths via Settings, config file, "
+        "or TAGGER_W2V_SMALL/TAGGER_W2V_BIG env vars."
+    )
 
 
 def load_raw_file(fileloc):
@@ -197,7 +249,7 @@ def _load_tagdtokd_file(fileloc):
             if emptytail is True:
                 retlist[-1] = retlist[-1]+['']
         elif len(tbuffy) > 0:
-            retlist.appen(tbuffy)
+            retlist.append(tbuffy)
         return retlist
 
     retlist = list()
@@ -346,7 +398,7 @@ def filter_elems(elems):
 
 
 def load_tiger_vrt_file(
-        fileloc='../data/tiger_release_aug07.corrected.16012013-empirist.vrt.bz2'):
+        fileloc=None):
     """
     Load a bz2 compressed tiger vrt (tok\tlem\tpos) file.
 
@@ -354,7 +406,9 @@ def load_tiger_vrt_file(
         fileloc: location of the compressed vertical file
 
     """
-    # utils.load_tiger_vrt_file('../data/tiger/tiger_release_aug07.corrected.16012013.vrt.bz2')
+    if fileloc is None:
+        fileloc = DATA_ROOT / "tiger_release_aug07.corrected.16012013-empirist.vrt.bz2"
+
     def process_tbuffy(tbuffy):
         retlist = list()
         if len(tbuffy) > 0:
@@ -395,6 +449,15 @@ def _encode_tok(tok, suffix_length=8):
     return _qonehotchars.encode(stoken).reshape(1280,)
 
 
+def _seeded_vector(model, tok: str):
+    if hasattr(model, "seeded_vector"):
+        return model.seeded_vector(tok)
+    if hasattr(model, "vector_size"):
+        rng = np.random.default_rng(abs(hash(tok)) % (2**32))
+        return rng.standard_normal(model.vector_size)
+    return np.zeros(1)
+
+
 def _nearby_tok(w2v, tok, tokid, tokens):
     if tok in w2v:
         retmat = w2v[tok]
@@ -412,13 +475,23 @@ def _nearby_tok(w2v, tok, tokid, tokens):
                          (str(tokens), str(nearby_before), tok,
                           str(nearby_after), nearby))
         else:
-            retmat = w2v.seeded_vector(tok)
+            retmat = _seeded_vector(w2v, tok)
             logger.debug("no tokens: %s" % (str(tokens)))
     return retmat
 
 
-def training_data_tagging(toks, tags, sample_size=-1, seqlen=None,
-                          padding=False, shuffle=False, postagstype=None):
+def training_data_tagging(
+    toks,
+    tags,
+    sample_size: int = -1,
+    seqlen=None,
+    padding: bool = False,
+    shuffle: bool = False,
+    postagstype=None,
+    w2v_small_model=None,
+    w2v_big_model=None,
+    settings: Settings | None = None,
+):
     """
     Load Training and Testing Data from the empirist data.
 
@@ -465,8 +538,7 @@ def training_data_tagging(toks, tags, sample_size=-1, seqlen=None,
         tok_elems = tok_elems[0:sample_size]
         tag_elems = tag_elems[0:sample_size]
 
-    w2v_empirist = w2v_small.data
-    w2v_bigdata = w2v_big.data
+    w2v_empirist, w2v_bigdata = ensure_embeddings(w2v_small_model, w2v_big_model, settings=settings)
     x, y, xorg, yorg = [], [], [], []
 
     for eid, elem in enumerate(tok_elems):
@@ -487,12 +559,9 @@ def training_data_tagging(toks, tags, sample_size=-1, seqlen=None,
                 x_big = _nearby_tok(w2v_bigdata, tok_l, tokid,
                                     [_sanitize_tok(tok) for tok in tokens])
                 toksline.append(np.concatenate((x_emp, x_big, tok_encd)))
-                dummy_emp = np.zeros(
-                    w2v_empirist.seeded_vector(_postags.padding_tag).shape)
-                dummy_big = np.zeros(
-                    w2v_bigdata.seeded_vector(_postags.padding_tag).shape)
-                dummy = np.concatenate((dummy_emp, dummy_big,
-                                        np.zeros(tok_encd.shape)))
+                dummy_emp = np.zeros(w2v_empirist.vector_size)
+                dummy_big = np.zeros(w2v_bigdata.vector_size)
+                dummy = np.concatenate((dummy_emp, dummy_big, np.zeros(tok_encd.shape)))
             if padding:
                 dummies = [dummy for did in range(seqlen-len(tokens))]
                 toksline.extend(dummies)
@@ -516,12 +585,11 @@ def training_data_tagging(toks, tags, sample_size=-1, seqlen=None,
     return x, y, xorg, yorg
 
 
-def get_test_data_tagging(flocs=all_tst_tokd_flocs):
+def get_test_data_tagging(flocs=all_tst_tokd_flocs, settings: Settings | None = None, w2v_small_model=None, w2v_big_model=None):
     toks, tags = load_tagged_files(flocs)
     all_tggd = (filter_elems(toks), filter_elems(tags))
     tok_elems = all_tggd[0]
-    w2v_empirist = w2v_small.data
-    w2v_bigdata = w2v_big.data
+    w2v_empirist, w2v_bigdata = ensure_embeddings(w2v_small_model, w2v_big_model, settings=settings)
     x, xorg = [], []
 
     for eid, elem in enumerate(tok_elems):
@@ -545,20 +613,21 @@ def get_test_data_tagging(flocs=all_tst_tokd_flocs):
     return x, xorg
 
 
-def process_test_data_tagging(model, postagstype, flocs, extension=".done"):
+def process_test_data_tagging(model, postagstype, flocs, extension=".done", batch_size: int = 1, settings: Settings | None = None, w2v_small_model=None, w2v_big_model=None):
     # for floc in all_tst_tokd_flocs:
     for floc in flocs:
-        elems, elems_org = get_test_data_tagging(flocs=[floc])
-        prcd_floc = floc + extension
+        elems, elems_org = get_test_data_tagging(flocs=[floc], settings=settings, w2v_small_model=w2v_small_model, w2v_big_model=w2v_big_model)
+        floc_path = Path(floc)
+        prcd_floc = floc_path.with_name(floc_path.name + extension)
         with open(prcd_floc, 'w') as prcdh:
             for elemid, elem in enumerate(elems):
-                preds = model.predict_classes(np.array([elem]), batch_size=1,
-                                              verbose=0)[0]
-                tags = _postags.decode_oh(preds, postagstype)
+                preds = model.predict(np.array([elem]), batch_size=batch_size, verbose=0)
+                classes = np.argmax(preds[0], axis=-1)
+                tags = _postags.decode_oh(classes, postagstype)
                 lines = [''] + ['\t'.join(x) for x in
                                 zip(elems_org[elemid].split('\n'), tags)]
                 prcdh.writelines('\n'.join(lines)+'\n')
-                if 'cmc/' in floc:
+                if 'cmc/' in str(floc):
                     prcdh.write('\n')
 
     # for file in empirist_test_pos_{cmc,web}/tokenized/*.done; do paste

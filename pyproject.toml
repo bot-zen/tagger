@@ -1,0 +1,43 @@
+[project]
+name = "botzen-tagger"
+version = "0.1.0"
+description = "BiLSTM-based PoS tagger with subword embeddings."
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+authors = [
+  {name = "bot.zen contributors"}
+]
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "pandas>=2.2",
+  "gensim>=4.3",
+  "smart-open>=6.4",
+  "conllu>=4.5",
+  "tensorflow>=2.16,<2.18",
+  "keras>=3.3,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.5",
+  "mypy>=1.10",
+]
+
+[project.scripts]
+tagger = "tagger.cli:main"
+
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+package = true
